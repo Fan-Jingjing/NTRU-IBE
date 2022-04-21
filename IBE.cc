@@ -128,7 +128,7 @@ int main()
     diff = ((float)t2 - (float)t1)/1000000.0F;
     cout << "It took " << diff << " seconds to generate the Master Secret Key" << endl;
 
-
+    
 
     //==============================================================================
     //Key extraction bench and encryption/decryption bench
@@ -150,12 +150,12 @@ int main()
     //Key extraction test and encryption/decryption test
     //==============================================================================
     const unsigned int nb_extrt = 100;
-    const unsigned int nb_crypt = 100;
+    const unsigned int nb_crypt = 100;//100;
 
     cout << "\n===================================================================\n CHECKING EXTRACTION VALIDITY FOR ";
     cout << nb_extrt << " DIFFERENT IDENTITIES\n===================================================================\n";
     Extract_Test(nb_extrt, MSKD, MPKD);
-
+   
     cout << "\n===================================================================\n CHECKING ENCRYPTION VALIDITY FOR ";
     cout << nb_extrt << " DIFFERENT MESSAGES\n===================================================================\n";
     Encrypt_Test(nb_crypt, MPKD, MSKD);
