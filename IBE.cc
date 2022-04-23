@@ -86,6 +86,7 @@ int main()
     cout << "\n=======================================================================\n";
     cout << "This program is a proof-of concept for efficient IBE over lattices.\n";
     cout << "It generates a NTRU lattice of dimension 2N and associated modulus q,\n";
+    cout << "the length of id's is idlength,\n";
     cout << "and perform benches and tests, for user key extraction and encryption/decryption.";
     cout << "\n=======================================================================\n\n";
 
@@ -106,6 +107,7 @@ int main()
 
     cout << "N = " << N0 << endl;
     cout << "q = " << q0 << endl;
+    cout << "idlength = " << idlength << endl;
 
     ZZ_p::init(q1);
     zz_p::init(q0);

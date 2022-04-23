@@ -10,7 +10,6 @@
 void Keygen(ZZ_pX& PublicKey0,ZZX* PublicKey1,ZZX& PublicKey2,ZZX* PrivateKey);
 void CompletePrivateKey(mat_ZZ& B, const ZZX * const PrivateKey);
 void GPV(RR_t * v, const RR_t * const c, const RR_t s, const MSK_Data * const MSKD);
-void Distribution(RR_t * v, const RR_t s, const MSK_Data * const MSKD);
 void CompleteMSK(MSK_Data * MSKD, ZZX * MSK);
 void CompleteMPK(MPK_Data * MPKD, ZZ_pX MPK0, ZZX * MPK1, ZZX MPK2);
 void IBE_Extract(ZZX SK_id[3], vec_ZZ id, const MSK_Data * const MSKD, const MPK_Data * const MPKD);

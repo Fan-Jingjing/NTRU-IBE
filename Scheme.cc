@@ -52,19 +52,13 @@ void Keygen(ZZ_pX& PublicKey0, ZZX* PublicKey1, ZZX& PublicKey2, ZZX* PrivateKey
     {
        
         H[i] = RandomPolyq(N0-1);
-        //cout<<deg(H[i])<<endl;;
         PublicKey1[i] = H[i];
-        //cout<<"h"<<i<<H[i]<<endl;
-        //cout<<i<<endl;
-        
     }
     u = RandomPolyq(N0-1);
     
     PublicKey0 = Quotient(f, g);
 
     PublicKey2 = u;
-    //cout<<"u"<<u<<endl;
-    //cout<<"h"<<PublicKey0<<endl;
 }
 
 //==============================================================================
@@ -124,45 +118,6 @@ void GPV(RR_t * v, const RR_t * const c, const RR_t s, const MSK_Data * const MS
     }
 
 }
-
-void Distribution(RR_t * v, const RR_t s, const MSK_Data * const MSKD)
-{
-
-    int i;
-    unsigned j;
-    RR_t ci[N0], zi, cip, sip, aux;
-
-    //for(j=0; j<2*N0; j++)
-    //{
-
-   // }    
-    for(i=N0-1; i>=0; i--)
-    {
-        aux = (MSKD->GS_Norms)[i];
-        //cip = DotProduct(ci, MSKD->Bstar[i])/(aux*aux);
-        sip = s/aux;
-/*
-        for (j=0; j<N0; j++)
-        {
-            zi = Sample3(sip*PiPrime);
-            v[j] = zi;
-        }*/
-        
-        zi = Sample3(sip*PiPrime);
-        for(j=0; j<N0; j++)
-        {
-            ci[j] -= zi*(MSKD->B)[i][j];
-        }
-    }
-
-    for(j=0; j<N0; j++)
-    {
-        v[j] = -ci[j];
-    }
-
-}
-
-
 
 //==============================================================================
 //==============================================================================
@@ -231,27 +186,11 @@ void IBE_Extract(ZZX SK_id[3], long id[idlength], const MSK_Data * const MSKD, c
     ZZX H[idlength+1];
     CC_t mid_FFT[N0], hid_FFT[N0], S_FFT[N0];
 
-    /*cout<<"id";
-    for (i=0; i<idlength; i++)
-    {
-        cout<<id[i];
-    }
-    cout<<endl;*/
-
     f = MSKD -> PrK[0];
     g = MSKD -> PrK[1];
     sigma = MSKD->sigma;
     SK_id[0].SetLength(N0);
     SK_id[1].SetLength(N0);
-    //SK_id[2].SetLength(N0);
-    //cout<<"SK3"<<SK_id[2]<<endl;
-
-    //SK_id[2].SetLength(N0);
-    /*
-    for (i=0; i<N0; i++)
-    {
-        SK_id[2] = rand()%q0;
-    }*/
 
     
     h = MPKD->h;
@@ -260,16 +199,14 @@ void IBE_Extract(ZZX SK_id[3], long id[idlength], const MSK_Data * const MSKD, c
     for (i=0;i<idlength+1;i++)
     {
         H[i] = (MPKD->H)[i];
-        //cout<<"h"<<i<<H[i]<<endl;
     }
     h_id = H[0];
-    //cout<<"3"<<endl;
+
     for (i=1;i<idlength+1;i++)
     {
         h_id += H[i]* id[i-1];
     }
 
-    //c->u-s_3*h_id
 
     ZZXToFFT(S_FFT,SK_id[2]);
 
@@ -290,7 +227,7 @@ void IBE_Extract(ZZX SK_id[3], long id[idlength], const MSK_Data * const MSKD, c
     
 
 
-    GPV(sk, c, sigma, MSKD);
+    GPV(sk, c, sigma/4, MSKD);
 
     for(i=0; i<N0; i++)
     {
@@ -303,21 +240,6 @@ void IBE_Extract(ZZX SK_id[3], long id[idlength], const MSK_Data * const MSKD, c
         SK_id[0][i] = sk[i];
         SK_id[1][i] = sk[i+N0];
     }
-    /*cout<<"sk1";
-    for (i = 0; i<N0; i++)
-    {
-        cout<<SK_id[0][i]<<" ";
-    }
-    
-    //cout<<endl;
-
-    cout<<"sk2";
-    for (i = 0; i<N0; i++)
-    {
-        cout<<SK_id[1][i]<<" ";
-    }
-    
-    cout<<endl;*/
 }
 
 
@@ -513,15 +435,22 @@ void Extract_Bench(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data * MPKD)
     //vec_ZZ id;
     ZZX SK_id[3];
     RR_t sigma;
-    RR_t sk[N0];
+    RR_t sk[2*N0],c[2*N0];
     long int identity[idlength];
 
     sigma = MSKD->sigma;
     SK_id[2].SetLength(N0);
-    Distribution(sk, sigma, MSKD);
+
+    for(i=0;i<N0;i++)
+    {
+        c[i] = 0 ;
+        c[i+N0] = 0;
+    }
+    GPV(sk, c, sigma/4, MSKD);
+
     for (i=0; i<N0;i++)
     {
-        SK_id[2][i] = sk[i];
+        SK_id[2][i] = -sk[i];
     }
 
     t1 = clock();
@@ -564,14 +493,21 @@ void Encrypt_Bench(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
     long int message[N0], decrypted[N0];
     long int identity[N0], Ciphertext[3][N0];
     RR_t sigma;
-    RR_t sk[N0];
+    RR_t sk[2*N0],c[2*N0];
 
     sigma = MSKD->sigma;
     SK_id[2].SetLength(N0);
-    Distribution(sk, sigma, MSKD);
+
+    for(i=0;i<N0;i++)
+    {
+        c[i] = 0 ;
+        c[i+N0] = 0;
+    }
+    GPV(sk, c, sigma/4, MSKD);
+
     for (i=0; i<N0;i++)
     {
-        SK_id[2][i] = sk[i];
+        SK_id[2][i] = -sk[i];
     }
     
     for(i=0; i<idlength; i++)
@@ -623,16 +559,22 @@ void Extract_Test(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data * MPKD)
     ZZX SK_id[3];
     long int identity[idlength];
     RR_t sigma;
-    RR_t sk[N0];
+    RR_t sk[2*N0],c[2*N0];
 
     rep = 0;
 
     sigma = MSKD->sigma;
-    Distribution(sk, sigma, MSKD);
+    for(i=0;i<N0;i++)
+    {
+        c[i] = 0 ;
+        c[i+N0] = 0;
+    }
+    GPV(sk, c, sigma/4, MSKD);
+
     SK_id[2].SetLength(N0);
     for (i = 0; i<N0; i++)
     {
-        SK_id[2][i] = sk[i];
+        SK_id[2][i] = -sk[i];
         //cout<<"sk3"<<i<<SK_id[2][i]<<endl;
     }
 
@@ -678,21 +620,28 @@ void Encrypt_Test(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
     long int id0[N0], Ciphertext[3][N0];
     long int message[N0], decrypted[N0];
     RR_t sigma;
-    RR_t sk[N0];
+    RR_t sk[2*N0],c[2*N0];
 
     sigma = MSKD->sigma;
-    Distribution(sk, sigma, MSKD);
+
+    for(i=0;i<N0;i++)
+    {
+        c[i] = 0 ;
+        c[i+N0] = 0;
+    }
+    GPV(sk, c, sigma/5, MSKD);
+
     SK_id[2].SetLength(N0);
-    /*
     for (i = 0; i<N0; i++)
     {
-        SK_id[2][i] = sk[i] % 2;
-    }*/
+        SK_id[2][i] = -sk[i];
+    }
+    /*
     for (i = 0; i<N0; i++)
     {
         SK_id[2][i] = rand() % 2;
     }
-
+*/
     for(i=0; i<N0; i++)
     {
         id0[i] = rand()%2;
