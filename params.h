@@ -17,11 +17,12 @@ using std::complex;
 // These are the parameters you need to change
 // N0 is the degree of the polynomial ring used. N0 must be a power of 2!
 // q0 is the modulus w.r.t. whom the integers are reduced. We suggest to take q0 prime
-// idlength is the length of the id's.
+// l is the length of the identiy.
 //=====================================================================================
 #define N0 512
-#define q0 (1<<30)
-#define idlength 4 
+//#define q0 (1<<60)
+#define length 160
+#define q0 576460752303423488//10995116277760
 //======================================================================================
 
 
@@ -40,7 +41,7 @@ const ZZ q1 = conv<ZZ>(q0);
 
 typedef struct
 {
-    ZZX PrK[4+idlength+1];
+    ZZX PrK[4];
     CC_t PrK_fft[4][N0];
     RR_t GS_Norms[2*N0];
     RR_t sigma;
@@ -52,12 +53,25 @@ typedef struct
 typedef struct
 {
     ZZ_pX h;
-    ZZX H[idlength+1];
-    ZZX u;
     CC_t h_FFT[N0];
-    //CC_t H_FFT[k][N0];
-    //CC_t u_FFT[N0];
+    ZZ_pX u;
+    ZZ_pX H1[length+1];
+    ZZ_pX H2[length+1];
+    ZZ_pXModulus Phi;
 } MPK_Data;
+
+typedef struct
+{
+    ZZ_pX SKID[4];
+    ZZ_pX h1id;
+    ZZ_pX h2id;
+} SKID_Data;
+
+typedef struct
+{
+    RR_t B[2*N0][2*N0];
+    RR_t Bstar[2*N0][2*N0];
+} Basis;
 
 
 
@@ -84,7 +98,9 @@ extern __inline__ uint64_t rdtsc(void) {
 
 
 // Useful constants up to ~500 bits
-const long double sigma_1= 0.84932180028801904272150283410288961971514109378435394286159953238339383120795466719298223538163406787061691601172910413284884326532697308797136114023L;//sqrt(1/(2*log(2)))
+//const long double sigma_1= 0.84932180028801904272150283410288961971514109378435394286159953238339383120795466719298223538163406787061691601172910413284884326532697308797136114023L;//sqrt(1/(2*log(2)))
+//const long double sigma_1= 8.4932180028801904272150283410288961971514109378435394286159953238339383120795466719298223538163406787061691601172910413284884326532697308797136114023L;//sqrt(1/(2*log(2)))
+const long double sigma_1= 84.932180028801904272150283410288961971514109378435394286159953238339383120795466719298223538163406787061691601172910413284884326532697308797136114023L;//sqrt(1/(2*log(2)))
 const long double log_2 = 0.6931471805599453094172321214581765680755001343602552541206800094933936219696947156058633269964186875420014810205706857336855202357581305570326707516L;
 const RR_t Pi = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679821480865132823066470938446095505822317253594081L;
 const RR_t PiPrime = 0.39894228040143267793994605993438186847585863116493465766592582967065792589930183850125233390730693643030255886263518268551099195455583724299621273062L; //1/sqrt(2*Pi)

@@ -7,6 +7,8 @@
 #include <NTL/ZZX.h>
 #include <NTL/mat_ZZ.h>
 #include <gmp.h>
+#include <fstream>
+#include <string>
 
 #include "Sampling.h"
 #include "params.h"
@@ -25,13 +27,10 @@ const ZZX phi = Cyclo();
 // - a public key : polynomial h
 // - a private key : polynomials f,g,F,G
 //==============================================================================
-void Keygen(ZZ_pX& PublicKey0, ZZX* PublicKey1, ZZX& PublicKey2, ZZX* PrivateKey)
+void Keygen(ZZ_pX& PublicKey, ZZX* PrivateKey)
 {
     ZZ SqNorm;
     ZZX f,g,F,G;
-    ZZ_pX h;
-    ZZX H[idlength+1];
-    ZZX u;
 
     SqNorm = conv<ZZ>(1.36*q0/2);
 
@@ -46,19 +45,8 @@ void Keygen(ZZ_pX& PublicKey0, ZZX* PublicKey1, ZZX& PublicKey2, ZZX* PrivateKey
             PrivateKey[i].SetLength(N0);
     }
 
-    
-
-    for (unsigned int i = 0; i<idlength+1; i++)
-    {
-       
-        H[i] = RandomPolyq(N0-1);
-        PublicKey1[i] = H[i];
-    }
-    u = RandomPolyq(N0-1);
-    
-    PublicKey0 = Quotient(f, g);
-
-    PublicKey2 = u;
+    PublicKey = Quotient(f, g);
+    //cout<<"PublicKey"<<PublicKey<<endl;
 }
 
 //==============================================================================
@@ -78,8 +66,276 @@ void CompletePrivateKey(mat_ZZ& B, const ZZX * const PrivateKey)
     B = BasisFromPolynomials(g, f, G, F);
 }
 
+vec_ZZ RandomBinaryVector()
+{
+    vec_ZZ w;
+    unsigned int i;
+    w.SetLength(N0);
+    for(i=0; i<N0; i++)
+    {
+        w[i] = conv<ZZ>(rand())%2;
+    }
+    return w;
+}
+
+void RandomSmallRingVector(ZZ_pX& w, long int div)
+{
+    unsigned int i;
+    //cout<<"w: ";
+    for(i=0; i<N0; i++)
+    {
+        w[i] = random() % div;
+        //cout<<w[i]<<" ";
+    }
+    //cout<<endl;
+    
+}
+
+void Hash1ID(ZZ_pX& h1id, const MPK_Data * const MPKD, vec_ZZ id)  
+{
+    h1id = MPKD->H1[0];
+    for (unsigned int i=0;i<length;i++)
+    {
+        if (id[i] == 1)
+            h1id = h1id + MPKD->H1[i];
+        else
+            h1id = h1id - MPKD->H1[i]; 
+    }
+}
+
+void Hash2ID(ZZ_pX& h2id, const MPK_Data * const MPKD, vec_ZZ id)  
+{
+    h2id = MPKD->H2[0];
+    for (unsigned int i=0;i<length;i++)
+    {
+        if (id[i] == 1)
+            h2id = h2id + MPKD->H2[i];
+        else
+            h2id = h2id - MPKD->H2[i]; 
+    }
+}
 
 
+void rng_uint64(uint64_t &t)
+{
+    ZZ temp = RandomLen_ZZ(64);
+   //t = conv<uint64_t>(temp);
+    t = conv<long int>(temp);
+}
+
+
+RR_t singleBitGaussian (const uint32_t stdev)
+{
+    static double const Pi=3.141592653589793238462643383279502884L;
+    static long const bignum = 0xfffffff;
+    double r1, r2, theta, rr;
+    uint64_t t;
+    double s;
+    rng_uint64(t);
+        r1 = (1+(t&bignum))/((double)bignum+1);
+        r2 = (1+((t>>32)&bignum))/((double)bignum+1);
+        theta = 2*Pi*r1;
+        rr = sqrt(-2.0*log(r2))*stdev;
+        s = rr*sin(theta) + 0.5;
+    return s;
+}
+
+
+void randomShortVec_ZZ(vec_ZZ &s, const uint32_t stdev)
+{
+    //const uint32_t   stdev = MSKD->sigma; 
+    const uint16_t  dim = N0;
+    uint16_t d2 = N0/2;
+    uint16_t i;
+    uint64_t t;
+
+    static double const Pi=3.141592653589793238462643383279502884L;
+    static long const bignum = 0xfffffff;
+    double r1, r2, theta, rr;
+
+    for (i=0;i<d2;i++)
+    {
+        rng_uint64(t);
+        r1 = (1+(t&bignum))/((double)bignum+1);
+        r2 = (1+((t>>32)&bignum))/((double)bignum+1);
+        theta = 2*Pi*r1;
+        rr = sqrt(-2.0*log(r2))*stdev;
+        s[2*i] = (int64_t) floor(rr*sin(theta) + 0.5);
+        s[2*i+1] = (int64_t) floor(rr*cos(theta) + 0.5);
+    }
+
+    if (dim%2 == 1)
+    {
+        rng_uint64(t);
+        r1 = (1+(t&bignum))/((double)bignum+1);
+        r2 = (1+((t>>32)&bignum))/((double)bignum+1);
+        theta = 2*Pi*r1;
+        rr = sqrt(-2.0*log(r2))*stdev;
+        s[dim-1] = (int64_t) floor(rr*sin(theta) + 0.5);
+    }  
+}
+
+void Gram_Schmidt(RR_t Bst[2*N0][2*N0], RR_t B[2*N0][2*N0])
+{   
+    
+    RR_t v[2*N0], v1[2*N0], C_k, D_k, C_ko, D_ko, aux;
+    //RR_t C[2*N0], D[2*N0];
+    unsigned int j, k;
+
+    //Reducing first vector (obvious)
+    for(j=0; j<2*N0; j++)
+    {    Bst[0][j] = B[0][j];    }
+
+    //Initialising the vector v = b_N - Proj(b_N, (b_1...b_k-2) )
+    for(j=0; j<N0-1; j++)
+    {    v[j] = Bst[0][j+1];
+         v[j+N0] = Bst[0][j+1+N0];    }
+    v[N0-1] = -Bst[0][0];
+    v[2*N0-1] = -Bst[0][N0];
+
+    for(j=0; j<2*N0; j++)
+    {    v1[j] = v[j];    }
+
+
+    //Initialising recurring variables
+    C_k = DotProduct(Bst[0], v);
+    D_k = DotProduct(v, v);
+
+    //C[0] = C_k;
+    //D[0] = D_k;
+    //CD[0] = C[0]/D[0];
+
+
+    //Reducing b_2 to b_N and updating v at the same time
+    for(k=1; k<N0; k++)
+    {
+        //b~k <-- r(b~_{k-1}) - <b~_{k-1},b_N>/<v_{k-1},b_N> r(v)
+        aux = C_k/D_k;
+        Bst[k][0] = -Bst[k-1][N0-1] + aux*v[N0-1];
+        Bst[k][N0] = -Bst[k-1][2*N0-1] + aux*v[2*N0-1];
+        for(j=1; j<N0; j++)
+        {
+            Bst[k][j] = Bst[k-1][j-1] - aux*v[j-1];
+            Bst[k][j+N0] = Bst[k-1][j+N0-1] - aux*v[j+N0-1];
+        }
+
+        //v <-- v - Proj(v, b~_{k-1} )
+        for(j=0; j<2*N0; j++)
+        {
+            v[j] -= aux*Bst[k-1][j];
+        }
+        //sqnorm_v -= aux*aux*SquareNorm[k-1];
+
+        C_ko = C_k;
+        D_ko = D_k;
+
+        C_k = DotProduct(Bst[k], v1);
+        D_k = D_ko - C_ko*C_ko/D_ko;
+
+        //C[k] = C_k;
+        //D[k] = D_k;
+        //CD[k] = C[k]/D[k];
+        //printf ("C[%d]= %Lf		", k, C_k);
+        //printf ("D[%d]= %Lf\n", k, D_k);
+    }
+
+
+
+    //Reducing second half!
+    //cout << "aux = " << (1<<10)/D[N0-1] << endl;
+    for(j=0; j<N0; j++)
+    {    Bst[N0][N0+j] = Bst[N0-1][N0-1-j]*q0/D_k;
+         Bst[N0][j] = -Bst[N0-1][2*N0-1-j]*q0/D_k;    }
+
+    //Initialising the vector v = b_N - Proj(b_N, (b_1...b_k-2) )
+    for(j=0; j<N0-1; j++)
+    {    v[j] = Bst[N0][j+1];
+         v[j+N0] = Bst[N0][j+1+N0];    }
+    v[N0-1] = -Bst[N0][0];
+    v[2*N0-1] = -Bst[N0][N0];
+
+    for(j=0; j<2*N0; j++)
+    {    v1[j] = v[j];    }
+
+
+    //Initialising recursive variables
+    C_k = DotProduct(Bst[N0], v1);
+    D_k = DotProduct(Bst[N0], Bst[N0]);
+
+    //C[N0] = C_k;
+    //D[N0] = D_k;
+    //CD[N0] = C[N0]/D[N0];
+
+
+    //Reducing b_2 to b_N and updating v at the same time
+    for(k=N0+1; k<2*N0; k++)
+    {
+        //b~k <-- r(b~_{k-1}) - <b~_{k-1},b_N>/<v_{k-1},b_N> r(v)
+        aux = C_k/D_k;
+        Bst[k][0] = -Bst[k-1][N0-1] + aux*v[N0-1];
+        Bst[k][N0] = -Bst[k-1][2*N0-1] + aux*v[2*N0-1];
+        for(j=1; j<N0; j++)
+        {
+            Bst[k][j] = Bst[k-1][j-1] - aux*v[j-1];
+            Bst[k][j+N0] = Bst[k-1][j+N0-1] - aux*v[j+N0-1];
+        }
+        //SquareNorm[k] = SquareNorm[k-1] - aux*aux*sqnorm_v;
+
+
+        //v <-- v - Proj(v, b~_{k-1} )
+        for(j=0; j<2*N0; j++)
+        {
+            v[j] -= aux*Bst[k-1][j];
+        }
+        //sqnorm_v -= aux*aux*SquareNorm[k-1];
+
+        C_ko = C_k;
+        D_ko = D_k;
+
+        C_k = DotProduct(Bst[k], v1);
+        D_k = D_ko - C_ko*C_ko/D_ko;
+
+        //C[k] = C_k;
+        //D[k] = D_k;
+        //CD[k] = C[k]/D[k];
+    }
+}
+
+
+void SampleD(RR_t * v, const RR_t * const c, const RR_t dev, Basis * Base)
+{
+
+    int i;
+    unsigned j;
+    RR_t ci[2*N0], zi, cip, sip, aux;
+
+    for(j=0; j<2*N0;j++)
+    {
+        ci[j] = c[j];
+    } 
+    Gram_Schmidt(Base->Bstar, Base->B);
+
+    for(i=2*N0-1; i>=0; i--)
+    {
+        aux = DotProduct((Base->Bstar)[i],(Base->Bstar)[i]);
+        aux = sqrt(aux);
+        cip = DotProduct(ci, Base->Bstar[i])/(aux*aux);
+        sip = dev/aux;
+        //zi = Sample4(cip, sip*PiPrime);// To be replaced
+        zi = ( (signed int) floor(cip) ) + (int64_t) floor(singleBitGaussian(sip));
+
+        for(j=0; j<2*N0; j++)
+        {
+            ci[j] -= zi*(Base->B)[i][j];
+        }
+    }
+
+    for(j=0; j<2*N0; j++)
+    {
+        v[j] = c[j] - ci[j];
+    }
+
+}
 
 
 void GPV(RR_t * v, const RR_t * const c, const RR_t s, const MSK_Data * const MSKD)
@@ -92,19 +348,15 @@ void GPV(RR_t * v, const RR_t * const c, const RR_t s, const MSK_Data * const MS
     for(j=0; j<2*N0;j++)
     {
         ci[j] = c[j];
-    }
-
-    //for(j=0; j<2*N0; j++)
-    //{
-
-   // }    
+    } 
 
     for(i=2*N0-1; i>=0; i--)
     {
         aux = (MSKD->GS_Norms)[i];
         cip = DotProduct(ci, MSKD->Bstar[i])/(aux*aux);
         sip = s/aux;
-        zi = Sample4(cip, sip*PiPrime);
+        zi = Sample4(cip, sip*PiPrime);// To be replaced
+        //zi = cip + singleBitGaussian(sip);
 
         for(j=0; j<2*N0; j++)
         {
@@ -118,6 +370,12 @@ void GPV(RR_t * v, const RR_t * const c, const RR_t s, const MSK_Data * const MS
     }
 
 }
+
+
+
+
+
+
 
 //==============================================================================
 //==============================================================================
@@ -159,264 +417,331 @@ void CompleteMSK(MSK_Data * MSKD, ZZX * MSK)
 
     MSKD->sigma = 2*MSKD->GS_Norms[0];
 
+
 }
 
 
 
-void CompleteMPK(MPK_Data * MPKD, ZZ_pX MPK0 ,ZZX * MPK1, ZZX MPK2 )
+void CompleteMPK(MPK_Data * MPKD, ZZ_pX MPK)
 {
-    MPKD->h = MPK0;
-    ZZXToFFT(MPKD->h_FFT, conv<ZZX>(MPK0));
-    for (unsigned i=0; i<idlength+1; i++)
+    MPKD->h = MPK;    
+    for (int i=0; i<length+1; i++)
     {
-        MPKD->H[i] = MPK1[i];
+        ZZ_pX temp1, temp2;
+        random(temp1, N0);
+        random(temp2, N0);        
+        MPKD->H1[i] = temp1;
+        MPKD->H2[i] = temp2; 
+        //cout<<"H1|H2"<<i<<": "<<MPKD->H1[i]<<"|"<<MPKD->H2[i]<<endl;  
     }
-    MPKD->u = MPK2;
+    ZZ_pX temp3;
+    random(temp3, N0);
+    MPKD->u = temp3;   
+    //cout<<"u: "<<MPKD->u<<endl; 
 }
 
 
-
-void IBE_Extract(ZZX SK_id[3], long id[idlength], const MSK_Data * const MSKD, const MPK_Data * const MPKD)
+void IBE_Extract(SKID_Data * SKID, vec_ZZ id, const MSK_Data * const MSKD, const MPK_Data *const MPKD)
 {
     unsigned int i;
     RR_t c[2*N0], sk[2*N0], sigma;
     ZZX f,g,aux;
-    ZZ_pX h;
-    ZZX u,h_id,mid;
-    ZZX H[idlength+1];
-    CC_t mid_FFT[N0], hid_FFT[N0], S_FFT[N0];
+    vec_ZZ temp;
+    ZZ_pX mid1,mid2,u,h1,h2,res,zeroTest;
+    RR_t B[2*N0][2*N0];
+    unsigned long stddev = 1<<30;
+    Basis *Base = new Basis;
+
 
     f = MSKD -> PrK[0];
     g = MSKD -> PrK[1];
     sigma = MSKD->sigma;
-    SK_id[0].SetLength(N0);
-    SK_id[1].SetLength(N0);
-
-    
-    h = MPKD->h;
     u = MPKD->u;
-
-    for (i=0;i<idlength+1;i++)
+    for(i=0; i<5; i++)
     {
-        H[i] = (MPKD->H)[i];
-    }
-    h_id = H[0];
-
-    for (i=1;i<idlength+1;i++)
-    {
-        h_id += H[i]* id[i-1];
+        SKID->SKID[i].SetLength(N0);
     }
 
-
-    ZZXToFFT(S_FFT,SK_id[2]);
-
-    ZZXToFFT(hid_FFT,h_id);
-   
-    for(i=0; i<N0; i++)
+    temp.SetLength(N0);
+    mid1.SetLength(N0);
+    mid2.SetLength(N0);
+    zeroTest.SetLength(N0);
+    for (i=0; i<N0;i++)
     {
-        mid_FFT[i] = S_FFT[i]*hid_FFT[i];
+        zeroTest[i] = 0;
     }
-    FFTToZZX(mid,mid_FFT);
-    
 
+    Hash1ID(h1, MPKD, id);
+    Hash2ID(h2, MPKD, id);
+    SKID->h1id = h1;
+    SKID->h2id = h2;
+
+    randomShortVec_ZZ(temp, stddev);
+    //cout<<"sk3: ";
+    for (i=0; i<N0; i++)
+    {
+        SKID->SKID[2][i] = conv<long>(temp[i]);
+        //cout<<temp[i]<<" ";
+    }
+    //cout<<endl;
+    if( SKID->SKID[2] == zeroTest)
+    {
+        cout<<"Sampling error3"<<endl;
+        return;
+    }
+
+    randomShortVec_ZZ(temp, stddev);
+    //cout<<"sk4: ";
+    for (i=0; i<N0; i++)
+    {
+        SKID->SKID[3][i] = conv<long>(temp[i]);
+        //cout<<temp[i]<<" ";
+    }
+   //cout<<endl;
+
+    if( SKID->SKID[3] == zeroTest)
+    {
+        cout<<"Sampling error4"<<endl;
+        return;
+    }
+    cout<<sigma<<endl;
+    MulMod(mid1,SKID->SKID[2],h1, MPKD->Phi);
+    MulMod(mid2,SKID->SKID[3],h2, MPKD->Phi);
+    res = u-mid1-mid2;
     for(i=0;i<N0;i++)
     {
-        c[i] = conv<double>(u[i]-mid[i]) ;
+        ZZ temp = conv<ZZ>(res[i]);
+        c[i] = ((RR_t) conv<double>(temp)) ;
         c[i+N0] = 0;
     }
     
+    //GPV(sk, c, sigma*2, MSKD);
+    //cout<<"SampleD begins"<<endl;
 
+    for (i = 0; i<2*N0; i++){
+        for (int j=0; j<2*N0; j++){
+            //B[i][j] = 1;
+            Base->B[i][j] = (MSKD->B)[i][j];
+            Base->Bstar[i][j] = 0;
+        }
+    } 
 
-    GPV(sk, c, sigma/4, MSKD);
+    SampleD(sk, c, sigma, Base);
+    //cout<<"SampleD ends"<<endl;
 
     for(i=0; i<N0; i++)
     {
-       sk[i] = c[i] - sk[i];
-       sk[i+N0] = - sk[i+N0];
+        sk[i] = c[i] - sk[i];
+        sk[i+N0] = - sk[i+N0];
     }
-
+    //cout<<"s1|s2: ";
     for(i=0; i<N0; i++)
     {
-        SK_id[0][i] = sk[i];
-        SK_id[1][i] = sk[i+N0];
+        SKID->SKID[0][i] = sk[i];
+        //cout<<SKID->SKID[0][i]<<"|";
+        SKID->SKID[1][i] = sk[i+N0];
+        //cout<<SKID->SKID[1][i]<<endl;
     }
-}
-
-
-unsigned long IBE_Verify_Key(const ZZX SK_id[3], const long id[idlength], const MSK_Data * const MSKD, const MPK_Data * const MPKD)
-{
-    unsigned int i;
-    ZZX f,g,t,aux,u,h_id, mid;
-    ZZ_pX h;
-    ZZX H[idlength+1];
-    CC_t mid_FFT[N0], hid_FFT[N0], S_FFT[N0];
-    f = MSKD -> PrK[0];
-    g = MSKD -> PrK[1];
+    //cout<<endl;
+    if( SKID->SKID[0] == zeroTest)
+    {
+        cout<<"Sampling error1"<<endl;
+        return;
+    }
+    if( SKID->SKID[1] == zeroTest)
+    {
+        cout<<"Sampling error2"<<endl;
+        return;
+    }
     
-    //t = conv<ZZX>(id);
-    //aux = ((SK_id[0] - t)*f + g*SK_id[1])%phi;
-    h = MPKD->h;
-    u = MPKD->u;
-    for (i=0;i<idlength+1;i++)
-    {
-        H[i] = (MPKD->H)[i];
-    }
-    h_id = H[0];
-    for (i=1;i<idlength+1;i++)
-    {
-        h_id += H[i]* id[i-1];
-    }
-
-    ZZXToFFT(S_FFT,SK_id[2]);
-    ZZXToFFT(hid_FFT,h_id);
-    for(i=0; i<N0; i++)
-    {
-        mid_FFT[i] = S_FFT[i]*hid_FFT[i];
-    }
-    FFTToZZX(mid,mid_FFT);
-
-    aux = ((SK_id[0] - u)*f + g*SK_id[1]+mid*f)%phi;
-    for(i=0; i<N0; i++)
-    {
-        aux[i] %= q1;
-    }
-
-    if( IsZero(aux) != 0)
-    {
-        cout << "The signature (s1,s2,s3) doesn't verify the required equality [ (s1 - u)*f + g*s2 + s3*h_id*f = 0 ] !\nActually, (s1 - u)*f + g*s2 + s3*h_id*f = " << aux << endl << endl;
-    }
-    return IsZero(aux);
 }
 
 
-void IBE_Encrypt(long C[3][N0], const long m[N0], const long id0[idlength], const MPK_Data * const MPKD)
+unsigned long IBE_Verify_Key(const SKID_Data * SKID, const vec_ZZ id, const MSK_Data * const MSKD, const MPK_Data * const MPKD)
 {
+    //want to check: s1 + s2* h + s3* h1id + s4*h2id = u
+    ZZ_pX h1,h2,u,h;
+    ZZ_pX sk[4], temp, res;
+    //string temp1;
+    
+    Hash1ID(h1, MPKD, id);
+    Hash2ID(h2, MPKD, id);
+    for (int i=0;i<4;i++)
+        sk[i] = SKID->SKID[i];
+
+    /*    
+    ifstream hin("h.txt");
+    ifstream uin("u.txt");
+    ifstream h1in("h1.txt");
+    ifstream h2in("h2.txt");
+    ifstream sk1("sk1.txt");
+    ifstream sk2("sk2.txt");
+    ifstream sk3("sk3.txt");
+    ifstream sk4("sk4.txt");
+
+    h.SetLength(N0);
+    u.SetLength(N0);
+    h1.SetLength(N0);
+    h2.SetLength(N0);
+    sk[0].SetLength(N0);
+    sk[1].SetLength(N0);
+    sk[2].SetLength(N0);
+    sk[3].SetLength(N0);
+
+    for (int i=0; i<N0; i++){
+        hin>>temp1;
+        h[i]=stoll(temp1);
+        uin>>temp1;
+        u[i] = stoll(temp1);
+        h1in>>temp1;
+        h1[i] = stoll(temp1);
+        h2in>>temp1;
+        h2[i] = stoll(temp1);
+        sk1>>temp1;
+        sk[0][i] = stoll(temp1);
+        sk2>>temp1;
+        sk[1][i] = stoll(temp1);
+        sk3>>temp1;
+        sk[2][i] = stoll(temp1);
+        sk4>>temp1;
+        sk[3][i] = stoll(temp1);
+
+    }*/
+    temp = sk[0];
+    MulMod(res,sk[1],MPKD->h, MPKD->Phi);
+    //MulMod(res,sk[1],h, MPKD->Phi);
+    temp = temp + res;
+    MulMod(res,sk[2],h1, MPKD->Phi);
+    temp = temp + res;
+    MulMod(res,sk[3],h2,MPKD->Phi);
+    temp = temp + res;
+    
+    if (MPKD->u==temp)
+        return 0;
+    else
+        return 1;
+
+}
+
+
+void IBE_Encrypt(long C[5][N0], const long m[N0], const vec_ZZ id, const MPK_Data * const MPKD)
+{
+    // compute h1id, h2id, t, e_1, e_2, e_3, e_4, e_5
+    // random gen v in R_q  
+    // c_1 = vt + e_1
+    // c_2 = (vh)t + e_2
+    // c_3 = (vh1id)t + e_3
+    // c_4 = (vh2id)t + e_4
+    // c_5 = (vu)t + e_5 + q/2 m
 
     unsigned long i;
-    long r[N0], e1[N0], e2[N0], e3[N0];
-    CC_t r_FFT[N0], t_FFT[N0], aux1_FFT[N0], aux2_FFT[N0], aux3_FFT[N0], hid_FFT[N0], u_FFT[N0];
-    ZZX H[idlength+1];
-    ZZX h_id,u;
-
-    for(i=0; i<N0; i++)
+    ZZ_pX h,h1id, h2id, v, vt,t,mq;
+    ZZ_pX c[5], e[5];
+    for (i = 0; i<5; i++)
     {
-        e1[i] = (rand()%3) - 1;
-        e2[i] = (rand()%3) - 1;
-        e3[i] = (rand()%3) - 1;
-        r[i] = (rand()%3) - 1;
+        e[i].SetLength(N0);
+        c[i].SetLength(N0);
     }
-
-    MyIntFFT(r_FFT, r);
-    //MyIntFFT(t_FFT, id0);
-    u = MPKD->u;
-    for (i=0;i<idlength+1;i++)
-    {
-        H[i] = (MPKD->H)[i];
-    }
-    h_id = H[0];
-
-    for (i=1;i<idlength+1;i++)
-    {
-        h_id += H[i]* id0[i-1];
-    }
-
-    ZZXToFFT(hid_FFT,h_id);
-    ZZXToFFT(u_FFT,u);
-
-    for(i=0; i<N0; i++)
-    {
-        aux1_FFT[i] = r_FFT[i]*((MPKD->h_FFT)[i]);
-        aux2_FFT[i] = r_FFT[i]*hid_FFT[i];
-        aux3_FFT[i] = r_FFT[i]*u_FFT[i];
-    }
-
-    MyIntReverseFFT(C[0], aux1_FFT);
-    MyIntReverseFFT(C[1], aux2_FFT);
-    MyIntReverseFFT(C[2], aux3_FFT);
-
-
-    for(i=0; i<N0; i++)
-    {
-        C[0][i] = (C[0][i] + e1[i]               + q0/2)%q0 - (q0/2);
-        C[1][i] = (C[1][i] + e2[i]               + q0/2)%q0 - (q0/2);
-        C[2][i] = (C[2][i] + e3[i] + (q0/2)*m[i] + q0/2)%q0 - (q0/2);
-    } 
+    v.SetLength(N0);
+    t.SetLength(N0);
+    vt.SetLength(N0);
+    mq.SetLength(N0);
+    random(v, N0);
+    Hash1ID(h1id, MPKD, id);
+    Hash2ID(h2id, MPKD, id);
+    
     /*
-    cout<<"c0: ";
-    for (i=0; i<N0;i++)
+    for(i=0; i<N0; i++)
     {
-        cout<<C[0][i]<<" ";
-    }
-    cout<<endl;
-
-    cout<<"c1: ";
-    for (i=0; i<N0;i++)
-    {
-        cout<<C[1][i]<<" ";
-    }
-    cout<<endl;
-
-    cout<<"c2: ";
-    for (i=0; i<N0;i++)
-    {
-        cout<<C[2][i]<<" ";
-    }
-    cout<<endl;
-
-   //Check the error terms
-    CC_t e1_FFT[N0], e2_FFT[N0], sum_FFT[N0];
-    long sum[N0];
-    MyIntFFT(e1_FFT,e1);
-    MyIntFFT(e2_FFT,e2);
-    for (i=0; i<N0; i++)
-    {
-        sum_FFT[i] = e1_FFT[i]*SKid1_FFT[i]+e2_FFT[i]*SKid2_FFT[i];
-    }
-    MyIntReverseFFT(sum,sum_FFT);
-    cout<<"Error Term: ";
-    for (i=0; i<N0; i++)
-    {
-        sum[i] = (((e3[i] - sum[i] + q0/2)%q0- (q0/2))%q0+ (q0>>2) )/(q0>>1);
-        cout<<sum[i]<<" "<<endl;
+        cout<<v[i]<<endl;
     }*/
-
-
+    RandomSmallRingVector(t,3);
+    for (i = 0; i<5; i++)
+    {
+        RandomSmallRingVector(e[i], 3);
+    }
+    //cout<<"mq: ";
+    for(i = 0; i<N0; i++)
+    {
+        if (m[i] ==0)
+            mq[i] = q0/2;
+        else
+            mq[i] = 0;
+        //cout<<mq[i]<<" ";
+    }
+    //cout<<endl;
+    MulMod(vt,v,t,MPKD->Phi);
+    c[0] = vt+e[0];
+    //cout<<c[0]<<endl;
+    MulMod(c[1],vt,MPKD->h,MPKD->Phi);
+    c[1] = c[1]+e[1];
+    //cout<<c[1]<<endl;
+    MulMod(c[2],vt,h1id,MPKD->Phi);
+    c[2] = c[2]+e[2];
+    //cout<<c[2]<<endl;
+    MulMod(c[3],vt,h2id,MPKD->Phi);
+    c[3] = c[3]+e[3];
+    //cout<<c[3]<<endl;
+    MulMod(c[4],vt,MPKD->u,MPKD->Phi);
+    c[4] = c[4]+e[4]+mq;
+    //cout<<c[4]<<endl;
+    //cout<<"C: ";
+    for(i=0; i<5; i++)
+    {
+        for(int j=0; j<N0; j++)
+        {
+            C[i][j] = conv<long int>(c[i][j]);
+            //cout<<C[i][j]<<" ";
+        }
+        //cout<<endl;
+    }
 
 }
 
-
-void IBE_Decrypt(long message[N0], const long C[3][N0], const CC_t * const SKid1_FFT,const CC_t * const SKid2_FFT)
+void IBE_Decrypt(long message[N0], const long C[5][N0], SKID_Data * SKID, const MPK_Data * const MPKD)
 {
     unsigned int i;
-    CC_t c0_FFT[N0], c1_FFT[N0], aux_FFT[N0];
-    long aux[N0];
+    //unsigned long message[N0];
+    ZZ_pX c[5],aux;
+    for(i=0; i<5;i++)
+    {
+        c[i].SetLength(N0);
+    }
+    aux.SetLength(N0);
+   
 
-    MyIntFFT(c0_FFT, C[0]);
-    MyIntFFT(c1_FFT, C[1]);
-
+    for(i=0; i<5; i++)
+    {
+        for(int j=0; j<N0; j++)
+        {
+            c[i][j] = C[i][j];
+            //cout<<C[i][j]<<" ";
+        }
+        //cout<<endl;
+    }
+    MulMod(aux,c[0],SKID->SKID[0],MPKD->Phi);
+    c[4] = c[4]-aux;
+    MulMod(aux,c[1],SKID->SKID[1],MPKD->Phi);
+    c[4] = c[4]-aux;
+    MulMod(aux,c[2],SKID->SKID[2],MPKD->Phi);
+    c[4] = c[4]-aux;
+    MulMod(aux,c[3],SKID->SKID[3],MPKD->Phi);
+    c[4] = c[4]-aux;
+    long temp;
     for(i=0; i<N0; i++)
     {
-        aux_FFT[i] = c0_FFT[i] * SKid1_FFT[i] + c1_FFT[i] * SKid2_FFT[i];
+        //message[i] = C[1][i] - message[i];
+        temp = conv<long int>(c[4][i]);
+        temp = temp%q0;
+        temp = temp-q0/2;
+        if(temp>q0/4||temp<-q0/4)
+            message[i] = 1;
+        else
+            message[i] = 0;
     }
-
-    MyIntReverseFFT(aux, aux_FFT);
-
-    for(i=0; i<N0; i++)
-    {
-        message[i] = C[2][i] - aux[i];
-        message[i] = ((unsigned long)(message[i] ))%q0;
-        message[i] = (message[i] + (q0>>2) )/(q0>>1);
-        message[i] %= 2;
-    }
-/*
-    cout<<"Decrypted: ";
-    for (i=0; i<N0;i++)
-    {
-        cout<<message[i]<<" ";
-    }
-    cout<<endl;*/
 
 }
+
 
 
 //==============================================================================
@@ -427,48 +752,23 @@ void IBE_Decrypt(long message[N0], const long C[3][N0], const CC_t * const SKid1
 //==============================================================================
 
 
-void Extract_Bench(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data * MPKD)
+void Extract_Bench(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data *MPKD)
 {
     clock_t t1, t2;
     float diff;
-    unsigned int i,j;
-    //vec_ZZ id;
-    ZZX SK_id[3];
-    RR_t sigma;
-    RR_t sk[2*N0],c[2*N0];
-    long int identity[idlength];
-
-    sigma = MSKD->sigma;
-    SK_id[2].SetLength(N0);
-
-    for(i=0;i<N0;i++)
-    {
-        c[i] = 0 ;
-        c[i+N0] = 0;
-    }
-    GPV(sk, c, sigma/4, MSKD);
-
-    for (i=0; i<N0;i++)
-    {
-        SK_id[2][i] = -sk[i];
-    }
+    unsigned int i;
+    vec_ZZ id;
+    id = RandomBinaryVector();
+    SKID_Data *SKID = new SKID_Data;
 
     t1 = clock();
 
     cout << "0%" << flush;
     for(i=0; i<nb_extr; i++)
     {
-        /*
-        for (j = 0; j<idlength; j++)
-        {
-            id[j] = rand()%2;
+        id = RandomBinaryVector();
 
-        }*/
-        for(j=0; j<idlength; j++)
-        {
-            identity[j] = rand()%2;
-        }
-        IBE_Extract(SK_id, identity, MSKD, MPKD);
+        IBE_Extract(SKID, id, MSKD,MPKD);
         if((i+1)%(nb_extr/10)==0)
         {
             cout << "..." << (i+1)/(nb_extr/10) << "0%" << flush;
@@ -487,42 +787,17 @@ void Encrypt_Bench(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
     clock_t t1, t2;
     double diff;
     unsigned int i,j;
-    //long id[idlength];
-    ZZX SK_id[3], w;
-    CC_t SKid_FFT[N0],SKid1_FFT[N0], SKid2_FFT[N0];
+    vec_ZZ id;
+    //ZZX SK_id[2], w;
     long int message[N0], decrypted[N0];
-    long int identity[N0], Ciphertext[3][N0];
-    RR_t sigma;
-    RR_t sk[2*N0],c[2*N0];
+    long int Ciphertext[5][N0];
+    SKID_Data *SKID = new SKID_Data;
 
-    sigma = MSKD->sigma;
-    SK_id[2].SetLength(N0);
-
-    for(i=0;i<N0;i++)
-    {
-        c[i] = 0 ;
-        c[i+N0] = 0;
-    }
-    GPV(sk, c, sigma/4, MSKD);
-
-    for (i=0; i<N0;i++)
-    {
-        SK_id[2][i] = -sk[i];
-    }
+    id = RandomBinaryVector();
     
-    for(i=0; i<idlength; i++)
-    {
-        identity[i] = rand()%2;
-    }
+    IBE_Extract(SKID, id, MSKD,MPKD);
+    IBE_Verify_Key(SKID,id, MSKD, MPKD);
 
-
-    IBE_Extract(SK_id, identity, MSKD, MPKD);
-    IBE_Verify_Key(SK_id, identity, MSKD, MPKD);
-
-    ZZXToFFT(SKid1_FFT, SK_id[1]);
-    ZZXToFFT(SKid2_FFT, SK_id[2]);
-
-    
     t1 = clock();
 
     cout << "0%" << flush;
@@ -534,8 +809,8 @@ void Encrypt_Bench(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
             message[j] = (rand()%2);
         }
 
-        IBE_Encrypt(Ciphertext, message, identity, MPKD);
-        IBE_Decrypt(decrypted, Ciphertext, SKid1_FFT, SKid2_FFT);
+        IBE_Encrypt(Ciphertext, message, id, MPKD);
+        IBE_Decrypt(decrypted, Ciphertext, SKID, MPKD);
 
         if((i+1)%(nb_cryp/10)==0)
         {
@@ -551,52 +826,22 @@ void Encrypt_Bench(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
 }
 
 
-
-void Extract_Test(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data * MPKD)
+void Extract_Test(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data *MPKD)
 {
-    unsigned int i,j , rep;
-    //vec_ZZ id;
-    ZZX SK_id[3];
-    long int identity[idlength];
-    RR_t sigma;
-    RR_t sk[2*N0],c[2*N0];
+    unsigned int i, rep;
+    vec_ZZ id;
 
     rep = 0;
-
-    sigma = MSKD->sigma;
-    for(i=0;i<N0;i++)
-    {
-        c[i] = 0 ;
-        c[i+N0] = 0;
-    }
-    GPV(sk, c, sigma/4, MSKD);
-
-    SK_id[2].SetLength(N0);
-    for (i = 0; i<N0; i++)
-    {
-        SK_id[2][i] = -sk[i];
-        //cout<<"sk3"<<i<<SK_id[2][i]<<endl;
-    }
-
 
     cout << "0%" << flush;
     for(i=0; i<nb_extr; i++)
     {
-        //id = RandomVector();
-        /*
-        for (j = 0; j<idlength; j++)
-        {
-            id[j] = rand()%2;
-        }*/
-        for(j=0; j<idlength; j++)
-        {
-            identity[j] = rand()%2;
-        }
+        id = RandomBinaryVector();
+        SKID_Data *SKID = new SKID_Data;
 
-        //cout<<"identity"<<identity<<endl;
+        IBE_Extract(SKID, id, MSKD,MPKD);
 
-        IBE_Extract(SK_id, identity, MSKD, MPKD);
-        rep += IBE_Verify_Key(SK_id, identity, MSKD, MPKD);
+        rep += IBE_Verify_Key(SKID,id, MSKD, MPKD);
         if((i+1)%(nb_extr/10)==0)
         {
             cout << "..." << (i+1)/(nb_extr/10) << "0%" << flush;
@@ -614,49 +859,20 @@ void Extract_Test(const unsigned int nb_extr, MSK_Data * MSKD, MPK_Data * MPKD)
 void Encrypt_Test(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
 {
     unsigned int i, j, rep;
-    //vec_ZZ id;
-    ZZX SK_id[3], m, w;
-    CC_t SKid_FFT[N0],SKid1_FFT[N0], SKid2_FFT[N0];
-    long int id0[N0], Ciphertext[3][N0];
+    vec_ZZ id;
+    ZZX m, w;
+    long int Ciphertext[5][N0];
     long int message[N0], decrypted[N0];
-    RR_t sigma;
-    RR_t sk[2*N0],c[2*N0];
 
-    sigma = MSKD->sigma;
 
-    for(i=0;i<N0;i++)
-    {
-        c[i] = 0 ;
-        c[i+N0] = 0;
-    }
-    GPV(sk, c, sigma/5, MSKD);
-
-    SK_id[2].SetLength(N0);
-    for (i = 0; i<N0; i++)
-    {
-        SK_id[2][i] = -sk[i];
-    }
-    /*
-    for (i = 0; i<N0; i++)
-    {
-        SK_id[2][i] = rand() % 2;
-    }
-*/
-    for(i=0; i<N0; i++)
-    {
-        id0[i] = rand()%2;
-    }
-
-    IBE_Extract(SK_id, id0, MSKD, MPKD);
-    IBE_Verify_Key(SK_id, id0, MSKD, MPKD);
-    ZZXToFFT(SKid1_FFT, SK_id[1]);
-    ZZXToFFT(SKid2_FFT, SK_id[2]);
+    id = RandomBinaryVector();
+    SKID_Data *SKID = new SKID_Data;
+    IBE_Extract(SKID, id, MSKD,MPKD);
+    IBE_Verify_Key(SKID,id, MSKD, MPKD);
 
 
     rep = 0;
-
-    
-    //cout<<"rep"<<rep<<endl;
+ 
 
     cout << "0%" << flush;
     for(i=0; i<nb_cryp; i++)
@@ -665,15 +881,13 @@ void Encrypt_Test(const unsigned int nb_cryp, MPK_Data * MPKD, MSK_Data * MSKD)
         for(j=0; j<N0; j++)
         {
             message[j] = (rand()%2);
-            //cout<<"message"<<j<<message[j]<<endl;
         }
 
-        IBE_Encrypt(Ciphertext, message, id0, MPKD);
-        IBE_Decrypt(decrypted, Ciphertext, SKid1_FFT, SKid2_FFT);
-        
+        IBE_Encrypt(Ciphertext, message, id, MPKD);
+        IBE_Decrypt(decrypted, Ciphertext, SKID, MPKD);
+
         for(j=0; j<N0; j++)
         {
-            //cout<<"decrypt"<<j<<decrypted[j]<<endl;
             if(message[j] != decrypted[j])
             {
                 cout << "ERROR : Dec(Enc(m)) != m " << endl;

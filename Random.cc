@@ -45,24 +45,9 @@ ZZX RandomPoly(const unsigned int degree)
 
 
 //==============================================================================
-//Generates a random polynomial of fixed degree with coefficients<q1
-//==============================================================================
-ZZX RandomPolyq(const unsigned int degree)
-{
-    unsigned int i;
-    ZZX f;
-    f.SetLength(degree+1);
-    for(i=0; i<=degree; i++)
-    {
-        f[i] = conv<ZZ>(rand())%q0;
-    }
-    return f;
-}
-
-
-//==============================================================================
 //Generates a random polynomial of fixed degree and "approximately" fixed squared norm
 //==============================================================================
+
 ZZX RandomPolyFixedSqNorm(const ZZ& SqNorm, const unsigned int degree)
 {
     unsigned int i;

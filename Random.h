@@ -6,7 +6,6 @@
 
 vec_ZZ RandomVector();
 ZZX RandomPoly(const unsigned int degree);
-ZZX RandomPolyq(const unsigned int degree);
 ZZX RandomPolyFixedSqNorm(const ZZ& SqNorm, const unsigned int degree);
 
 #endif
